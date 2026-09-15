@@ -50,8 +50,22 @@ jobs:
         run: |
           set -euo pipefail
 
+          python3 - "$VIDEO_URL" <<'PY'
+          import sys
+          from urllib.parse import urlparse
+
+          raw = sys.argv[1]
+          parsed = urlparse(raw)
+          if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+              raise SystemExit(
+                  "Invalid VIDEO_URL. n8n must send the direct video_files[].link URL, "
+                  f"not: {raw!r}"
+              )
+          print(f"Downloading video from host: {parsed.netloc}")
+          PY
+
           curl --fail --location --retry 3 --retry-delay 2 \
-            "$VIDEO_URL" -o source.mp4
+            --url "$VIDEO_URL" -o source.mp4
 
           python3 -m pip install --quiet edge-tts
 
