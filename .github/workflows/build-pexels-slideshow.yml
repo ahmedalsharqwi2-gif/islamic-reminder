@@ -1,0 +1,82 @@
+name: Build Pexels Slideshow
+
+on:
+  repository_dispatch:
+    types: [build_pexels_slideshow]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      IMAGE_URLS_JSON: ${{ github.event.client_payload.image_urls }}
+      TITLE: ${{ github.event.client_payload.title }}
+      CAPTION: ${{ github.event.client_payload.caption }}
+      JOB_TAG: ${{ github.event.client_payload.job_tag }}
+
+    steps:
+      - name: Install tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg jq
+
+      - name: Normalize inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB_TAG="${JOB_TAG#=}"
+          TITLE="${TITLE#=}"
+          CAPTION="${CAPTION#=}"
+          IMAGE_URLS_JSON="${IMAGE_URLS_JSON#=}"
+          printf 'JOB_TAG=%s\n' "$JOB_TAG" >> "$GITHUB_ENV"
+          printf 'TITLE=%s\n' "$TITLE" >> "$GITHUB_ENV"
+          printf 'CAPTION=%s\n' "$CAPTION" >> "$GITHUB_ENV"
+          printf '%s' "$IMAGE_URLS_JSON" > image_urls.json
+          jq -e 'type == "array" and length > 0 and all(.[]; type == "string" and startswith("http"))' image_urls.json
+
+      - name: Download Pexels images
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p images
+          i=0
+          while IFS= read -r url; do
+            i=$((i+1))
+            curl --fail --location --retry 3 --retry-delay 2 "$url" -o "images/image-${i}.jpg"
+          done < <(jq -r '.[]' image_urls.json)
+          test "$i" -gt 0
+
+      - name: Create MP4 slideshow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f concat.txt
+          for image in images/*.jpg; do
+            printf "file '%s'\nduration 5\n" "$PWD/$image" >> concat.txt
+          done
+          first_image=$(find images -type f -name '*.jpg' | sort | head -n 1)
+          printf "file '%s'\n" "$PWD/$first_image" >> concat.txt
+          ffmpeg -y -hide_banner -loglevel error \
+            -f concat -safe 0 -i concat.txt \
+            -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,format=yuv420p" \
+            -r 30 -c:v libx264 -preset medium -crf 21 -pix_fmt yuv420p \
+            -movflags +faststart "${JOB_TAG}.mp4"
+          test -s "${JOB_TAG}.mp4"
+          ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "${JOB_TAG}.mp4"
+
+      - name: Publish MP4 release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.JOB_TAG }}
+          name: ${{ env.TITLE }}
+          body: |
+            Generated from Pexels photos.
+            ${{ env.CAPTION }}
+            Build: ${{ github.run_id }}
+          files: ${{ env.JOB_TAG }}.mp4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
