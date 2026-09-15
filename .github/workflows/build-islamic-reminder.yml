@@ -81,6 +81,14 @@ jobs:
           test -s voice.mp3
           file source.mp4 voice.mp3
 
+      - name: Install ffmpeg
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -version | head -n 1
+
       - name: Render vertical short with ffmpeg
         shell: bash
         run: |
