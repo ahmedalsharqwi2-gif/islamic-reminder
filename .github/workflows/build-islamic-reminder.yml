@@ -45,6 +45,13 @@ jobs:
           test -n "$JOB_TAG" || { echo "Missing job_tag"; exit 1; }
           echo "Building $JOB_TAG"
 
+      - name: Install FFmpeg tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+
       - name: Download Pexels video and generate Arabic voice
         shell: bash
         run: |
