@@ -40,20 +40,27 @@ jobs:
         run: |
           set -euo pipefail
           # Remove accidental whitespace or wrapping quotes introduced by upstream JSON.
-          VIDEO_URL="$(printf '%s' "$VIDEO_URL" | sed -e 's/^['\"'"']//; s/['\"'"']$//' | xargs)"
-          AUDIO_URL="$(printf '%s' "$AUDIO_URL" | sed -e 's/^['\"'"']//; s/['\"'"']$//' | xargs)"
-          echo "VIDEO_URL=$VIDEO_URL" >> "$GITHUB_ENV"
-          echo "AUDIO_URL=$AUDIO_URL" >> "$GITHUB_ENV"
+          python3 <<'PY'
+          import os
+          from urllib.parse import urlparse
+
+          def clean(name):
+              value = os.environ.get(name, '').strip()
+              if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+                  value = value[1:-1].strip()
+              parsed = urlparse(value)
+              if parsed.scheme not in ('http', 'https') or not parsed.netloc:
+                  raise SystemExit(f'Invalid {name.lower()}: {value!r}')
+              return value
+
+          video_url = clean('VIDEO_URL')
+          audio_url = clean('AUDIO_URL')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env:
+              env.write(f'VIDEO_URL={video_url}\n')
+              env.write(f'AUDIO_URL={audio_url}\n')
+          PY
           test -n "$VIDEO_URL" || { echo "Missing video_url"; exit 1; }
           test -n "$AUDIO_URL" || { echo "Missing audio_url"; exit 1; }
-          python3 - "$VIDEO_URL" "$AUDIO_URL" <<'PY'
-          import sys
-          from urllib.parse import urlparse
-          for label, value in zip(("video_url", "audio_url"), sys.argv[1:]):
-              parsed = urlparse(value)
-              if parsed.scheme not in ("http", "https") or not parsed.netloc:
-                  raise SystemExit(f"Invalid {label}: {value!r}")
-          PY
           test -n "$JOB_TAG" || { echo "Missing job_tag"; exit 1; }
           echo "Building $JOB_TAG"
 
