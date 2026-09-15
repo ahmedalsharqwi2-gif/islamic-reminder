@@ -43,6 +43,8 @@ jobs:
           test -n "$VIDEO_URL" || { echo "Missing video_url"; exit 1; }
           test -n "$VOICE_TEXT" || { echo "Missing voice_text"; exit 1; }
           test -n "$JOB_TAG" || { echo "Missing job_tag"; exit 1; }
+          JOB_TAG="${JOB_TAG#=}"
+          echo "JOB_TAG=$JOB_TAG" >> "$GITHUB_ENV"
           echo "Building $JOB_TAG"
 
       - name: Install FFmpeg tools
