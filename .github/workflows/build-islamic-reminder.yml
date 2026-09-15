@@ -54,7 +54,7 @@ jobs:
           import sys
           from urllib.parse import urlparse
 
-          raw = sys.argv[1]
+          raw = sys.argv[1].lstrip().lstrip("=").strip()
           parsed = urlparse(raw)
           if parsed.scheme not in {"http", "https"} or not parsed.netloc:
               raise SystemExit(
@@ -64,8 +64,21 @@ jobs:
           print(f"Downloading video from host: {parsed.netloc}")
           PY
 
+          VIDEO_URL="${VIDEO_URL#=}"
           curl --fail --location --retry 3 --retry-delay 2 \
             --url "$VIDEO_URL" -o source.mp4
+
+          duration="$(ffprobe -v error -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 source.mp4)"
+
+          python3 - "$duration" <<'PY'
+          import sys
+
+          value = float(sys.argv[1])
+          if value <= 0:
+              raise SystemExit("Downloaded video has no valid duration.")
+          print(f"Source video duration: {value:.2f} seconds ({value / 60:.2f} minutes)")
+          PY
 
           python3 -m pip install --quiet edge-tts
 
@@ -94,6 +107,10 @@ jobs:
             "${JOB_TAG}.mp4"
 
           test -s "${JOB_TAG}.mp4"
+
+          final_duration="$(ffprobe -v error -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 "${JOB_TAG}.mp4")"
+          echo "Final video duration: ${final_duration} seconds"
 
       - name: Create GitHub Release and upload asset
         uses: softprops/action-gh-release@v2
