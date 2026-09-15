@@ -46,6 +46,10 @@ jobs:
 
           def clean(name):
               value = os.environ.get(name, '').strip()
+              # n8n can serialize an inline expression as '=https://...'.
+              # Remove that expression marker before URL validation/download.
+              if value.startswith('='):
+                  value = value[1:].strip()
               if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
                   value = value[1:-1].strip()
               parsed = urlparse(value)
@@ -78,11 +82,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Loop/crop the stock video to 1080x1920 and render exactly 20 seconds.
+          # Loop/crop the stock video to 1080x1920 and render exactly 30 seconds.
           # The voice plays once; apad adds silence after it until the target duration.
           ffmpeg -y -hide_banner -loglevel error \
             -stream_loop -1 -i source.mp4 -i voice.mp3 \
-            -map 0:v:0 -map 1:a:0 -t 20 \
+            -map 0:v:0 -map 1:a:0 -t 30 \
             -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,format=yuv420p" \
             -af "apad" \
             -c:v libx264 -preset medium -crf 20 -r 30 \
