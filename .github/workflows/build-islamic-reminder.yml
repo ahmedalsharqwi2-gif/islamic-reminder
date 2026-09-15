@@ -1,0 +1,157 @@
+name: Build Islamic Reminder Video
+
+on:
+  repository_dispatch:
+    types: [build_islamic_reminder]
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: Direct downloadable Pexels video URL
+        required: true
+        type: string
+      audio_url:
+        description: Direct StreamElements audio URL
+        required: true
+        type: string
+      title:
+        description: Video title
+        required: true
+        type: string
+      job_tag:
+        description: Unique tag, for example reminder-20260915-223000-abc123
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VIDEO_URL: ${{ github.event.client_payload.video_url || inputs.video_url }}
+      AUDIO_URL: ${{ github.event.client_payload.audio_url || inputs.audio_url }}
+      TITLE: ${{ github.event.client_payload.title || inputs.title }}
+      JOB_TAG: ${{ github.event.client_payload.job_tag || inputs.job_tag }}
+    steps:
+      - name: Validate input
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$VIDEO_URL" || { echo "Missing video_url"; exit 1; }
+          test -n "$AUDIO_URL" || { echo "Missing audio_url"; exit 1; }
+          test -n "$JOB_TAG" || { echo "Missing job_tag"; exit 1; }
+          echo "Building $JOB_TAG"
+
+      - name: Download Pexels video and StreamElements audio
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --retry-delay 2 "$VIDEO_URL" -o source.mp4
+          curl --fail --location --retry 3 --retry-delay 2 "$AUDIO_URL" -o voice.mp3
+          test -s source.mp4
+          test -s voice.mp3
+          file source.mp4 voice.mp3
+
+      - name: Render vertical short with ffmpeg
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Loop/crop the stock video to 1080x1920 and stop exactly when the voice ends.
+          # The source has no audio, so the Arabic voice is the only audio track.
+          ffmpeg -y -hide_banner -loglevel error \
+            -stream_loop -1 -i source.mp4 -i voice.mp3 \
+            -map 0:v:0 -map 1:a:0 -shortest \
+            -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,format=yuv420p" \
+            -c:v libx264 -preset medium -crf 20 -r 30 \
+            -c:a aac -b:a 192k -movflags +faststart \
+            "${JOB_TAG}.mp4"
+          test -s "${JOB_TAG}.mp4"
+
+      - name: Create GitHub Release and upload asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.JOB_TAG }}
+          name: ${{ env.TITLE }}
+          body: |
+            Generated Islamic reminder video.
+            Source video: Pexels
+            Voice: StreamElements
+            Build: ${{ github.run_id }}
+          draft: false
+          prerelease: false
+          files: ${{ env.JOB_TAG }}.mp4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Print asset URL
+        shell: bash
+        run: |
+          echo "Release tag: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${JOB_TAG}"
+          echo "Asset URL: https://github.com/${GITHUB_REPOSITORY}/releases/download/${JOB_TAG}/${JOB_TAG}.mp4"
+
+      - name: Cleanup source files
+        if: always()
+        run: rm -f source.mp4 voice.mp3 "${JOB_TAG}.mp4" || true
+
+# Required repository settings:
+# - Actions must be enabled.
+# - The repository must allow GITHUB_TOKEN to write Contents.
+# - n8n must use a GitHub token with repo contents write permission to call repository_dispatch.
+# - The Pexels and StreamElements URLs must be publicly downloadable by GitHub runners.
+# - Release tags are unique; n8n generates JOB_TAG for every run.
+
+# Manual test payload (replace values):
+# curl -X POST https://api.github.com/repos/OWNER/REPO/dispatches \
+#   -H 'Accept: application/vnd.github+json' \
+#   -H 'Authorization: Bearer YOUR_TOKEN' \
+#   -d '{"event_type":"build_islamic_reminder","client_payload":{"video_url":"https://example.com/video.mp4","audio_url":"https://example.com/audio.mp3","title":"اختبار","job_tag":"reminder-test-001"}}'
+
+# Note: GitHub Actions may take a few seconds to start. n8n polls the release by tag
+# instead of relying on a callback, so no inbound webhook to n8n is required.
+
+# If the selected Pexels file is not directly downloadable in your account/region,
+# replace it in n8n with another video_files[].link returned by the Pexels API.
+
+# Security: never put a GitHub token, Pexels key, or Telegram token in this file.
+# Store them in n8n credentials or GitHub secrets only.
+
+# The release asset is public when the repository is public. For a private repository,
+# the browser_download_url requires authentication and cannot be used directly by n8n
+# YouTube unless n8n downloads it with an authenticated GitHub request.
+
+# The workflow intentionally does not add music or subtitles.
+
+# End of workflow.
+
+# YAML note: repository_dispatch payload values are exposed through github.event.client_payload.
+# workflow_dispatch values are exposed through inputs.* for manual testing.
+
+# This file is deliberately self-contained so it can be copied into .github/workflows/.
+
+# No Kie.ai call is used anywhere in this workflow.
+
+# ffmpeg is preinstalled on ubuntu-latest.
+
+# Release asset name is exactly ${JOB_TAG}.mp4.
+
+# n8n can construct the final download URL without parsing the release API, but it still
+# polls the API to confirm that the asset exists before continuing to Sheets/Telegram/YouTube.
+
+# End.
+
+# Compatibility: GitHub Actions expressions support || fallback for dispatch/manual inputs.
+
+# Use a unique job_tag to avoid release conflicts.
+
+# Done.
+
+# ---
+# The repeated comments above are intentional documentation for operators who open only this file.
+# ---
+
+# Final security reminder: rotate tokens if they were ever pasted into workflow JSON or chat.
+
+# EOF
+
