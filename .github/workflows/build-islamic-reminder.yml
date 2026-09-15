@@ -68,7 +68,7 @@ jobs:
           test -n "$JOB_TAG" || { echo "Missing job_tag"; exit 1; }
           echo "Building $JOB_TAG"
 
-      - name: Download Pexels video and StreamElements audio
+      - name: Download Pexels video and Arabic audio
         shell: bash
         run: |
           set -euo pipefail
