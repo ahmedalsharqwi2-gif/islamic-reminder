@@ -39,8 +39,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Remove accidental whitespace or wrapping quotes introduced by upstream JSON.
+          VIDEO_URL="$(printf '%s' "$VIDEO_URL" | sed -e 's/^['\"'"']//; s/['\"'"']$//' | xargs)"
+          AUDIO_URL="$(printf '%s' "$AUDIO_URL" | sed -e 's/^['\"'"']//; s/['\"'"']$//' | xargs)"
+          echo "VIDEO_URL=$VIDEO_URL" >> "$GITHUB_ENV"
+          echo "AUDIO_URL=$AUDIO_URL" >> "$GITHUB_ENV"
           test -n "$VIDEO_URL" || { echo "Missing video_url"; exit 1; }
           test -n "$AUDIO_URL" || { echo "Missing audio_url"; exit 1; }
+          python3 - "$VIDEO_URL" "$AUDIO_URL" <<'PY'
+          import sys
+          from urllib.parse import urlparse
+          for label, value in zip(("video_url", "audio_url"), sys.argv[1:]):
+              parsed = urlparse(value)
+              if parsed.scheme not in ("http", "https") or not parsed.netloc:
+                  raise SystemExit(f"Invalid {label}: {value!r}")
+          PY
           test -n "$JOB_TAG" || { echo "Missing job_tag"; exit 1; }
           echo "Building $JOB_TAG"
 
@@ -48,8 +61,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --location --retry 3 --retry-delay 2 "$VIDEO_URL" -o source.mp4
-          curl --fail --location --retry 3 --retry-delay 2 "$AUDIO_URL" -o voice.mp3
+          curl --fail --location --retry 3 --retry-delay 2 --url "$VIDEO_URL" --output source.mp4
+          curl --fail --location --retry 3 --retry-delay 2 --url "$AUDIO_URL" --output voice.mp3
           test -s source.mp4
           test -s voice.mp3
           file source.mp4 voice.mp3
@@ -58,12 +71,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Loop/crop the stock video to 1080x1920 and stop exactly when the voice ends.
-          # The source has no audio, so the Arabic voice is the only audio track.
+          # Loop/crop the stock video to 1080x1920 and render exactly 20 seconds.
+          # The voice plays once; apad adds silence after it until the target duration.
           ffmpeg -y -hide_banner -loglevel error \
             -stream_loop -1 -i source.mp4 -i voice.mp3 \
-            -map 0:v:0 -map 1:a:0 -shortest \
+            -map 0:v:0 -map 1:a:0 -t 20 \
             -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,format=yuv420p" \
+            -af "apad" \
             -c:v libx264 -preset medium -crf 20 -r 30 \
             -c:a aac -b:a 192k -movflags +faststart \
             "${JOB_TAG}.mp4"
@@ -154,4 +168,3 @@ jobs:
 # Final security reminder: rotate tokens if they were ever pasted into workflow JSON or chat.
 
 # EOF
-
