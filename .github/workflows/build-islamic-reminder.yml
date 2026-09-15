@@ -13,6 +13,10 @@ on:
         description: Arabic reminder text to convert to speech
         required: true
         type: string
+      background_url:
+        description: Optional direct downloadable MP3/WAV background or Quran URL
+        required: false
+        type: string
       title:
         description: Video title
         required: true
@@ -32,6 +36,7 @@ jobs:
     env:
       VIDEO_URL: ${{ github.event.client_payload.video_url || inputs.video_url }}
       VOICE_TEXT: ${{ github.event.client_payload.voice_text || inputs.voice_text }}
+      BACKGROUND_URL: ${{ github.event.client_payload.background_url || inputs.background_url }}
       TITLE: ${{ github.event.client_payload.title || inputs.title }}
       JOB_TAG: ${{ github.event.client_payload.job_tag || inputs.job_tag }}
 
@@ -45,8 +50,12 @@ jobs:
           test -n "$JOB_TAG" || { echo "Missing job_tag"; exit 1; }
           JOB_TAG="${JOB_TAG#=}"
           TITLE="${TITLE#=}"
+          VOICE_TEXT="${VOICE_TEXT#=}"
+          BACKGROUND_URL="${BACKGROUND_URL#=}"
           echo "JOB_TAG=$JOB_TAG" >> "$GITHUB_ENV"
           echo "TITLE=$TITLE" >> "$GITHUB_ENV"
+          echo "VOICE_TEXT=$VOICE_TEXT" >> "$GITHUB_ENV"
+          echo "BACKGROUND_URL=$BACKGROUND_URL" >> "$GITHUB_ENV"
           echo "Building $JOB_TAG"
 
       - name: Install FFmpeg tools
@@ -98,6 +107,14 @@ jobs:
             --text "$VOICE_TEXT" \
             --write-media voice.mp3
 
+          if [ -n "$BACKGROUND_URL" ]; then
+            curl --fail --location --retry 3 --retry-delay 2 \
+              --url "$BACKGROUND_URL" -o background.audio
+            ffmpeg -y -hide_banner -loglevel error \
+              -i background.audio -vn -c:a libmp3lame -b:a 128k background.mp3
+            test -s background.mp3
+          fi
+
           test -s source.mp4
           test -s voice.mp3
           file source.mp4 voice.mp3
@@ -109,13 +126,24 @@ jobs:
 
           # Loop/crop the stock video to 1080x1920 and stop when the voice ends.
           # The source video has no audio, so the generated Arabic voice is the only audio track.
-          ffmpeg -y -hide_banner -loglevel error \
-            -stream_loop -1 -i source.mp4 -i voice.mp3 \
-            -map 0:v:0 -map 1:a:0 -shortest \
-            -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,format=yuv420p" \
-            -c:v libx264 -preset medium -crf 20 -r 30 \
-            -c:a aac -b:a 192k -movflags +faststart \
-            "${JOB_TAG}.mp4"
+          if [ -s background.mp3 ]; then
+            ffmpeg -y -hide_banner -loglevel error \
+              -stream_loop -1 -i source.mp4 -i voice.mp3 -stream_loop -1 -i background.mp3 \
+              -filter_complex "[1:a]volume=1.0[voice];[2:a]volume=0.12[bg];[voice][bg]amix=inputs=2:duration=first:dropout_transition=2[mix]" \
+              -map 0:v:0 -map "[mix]" -shortest \
+              -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,format=yuv420p" \
+              -c:v libx264 -preset medium -crf 20 -r 30 \
+              -c:a aac -b:a 192k -movflags +faststart \
+              "${JOB_TAG}.mp4"
+          else
+            ffmpeg -y -hide_banner -loglevel error \
+              -stream_loop -1 -i source.mp4 -i voice.mp3 \
+              -map 0:v:0 -map 1:a:0 -shortest \
+              -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,format=yuv420p" \
+              -c:v libx264 -preset medium -crf 20 -r 30 \
+              -c:a aac -b:a 192k -movflags +faststart \
+              "${JOB_TAG}.mp4"
+          fi
 
           test -s "${JOB_TAG}.mp4"
 
@@ -149,7 +177,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          rm -f source.mp4 voice.mp3 "${JOB_TAG}.mp4" || true
+          rm -f source.mp4 voice.mp3 background.audio background.mp3 "${JOB_TAG}.mp4" || true
 
 # Required repository settings:
 # - Actions must be enabled.
