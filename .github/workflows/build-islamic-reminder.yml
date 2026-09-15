@@ -72,8 +72,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --location --retry 3 --retry-delay 2 --url "$VIDEO_URL" --output source.mp4
-          curl --fail --location --retry 3 --retry-delay 2 --url "$AUDIO_URL" --output voice.mp3
+          curl --fail-with-body --location --retry 3 --retry-delay 2 --url "$VIDEO_URL" --output source.mp4
+          curl --fail-with-body --location --retry 3 --retry-delay 2 \
+            --user-agent "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131 Safari/537.36" \
+            --header "Accept: audio/mpeg,audio/*;q=0.9,*/*;q=0.8" \
+            --url "$AUDIO_URL" --output voice.mp3
           test -s source.mp4
           test -s voice.mp3
           file source.mp4 voice.mp3
